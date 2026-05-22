@@ -1,43 +1,70 @@
-const express = require('express');
-const cors = require('cors');
-const app = express();
-require('dotenv').config();
-const port =process.env.PORT|| 3000;
-app.use(cors())
-app.use(express.json())
-
+const express = require("express");
+const cors = require("cors");
+const dotenv = require("dotenv");
 const admin = require("firebase-admin");
+const {
+  MongoClient,
+  ServerApiVersion,
+  ObjectId,
+} = require("mongodb");
 
-const serviceAccount = require("./future-box-firebase-adminsdk.json");
+dotenv.config();
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+/* Middlewares */
+
+app.use(cors());
+app.use(express.json());
+
+/* Firebase Admin */
+
+const serviceAccount = {
+  type: "service_account",
+  project_id: process.env.FIREBASE_PROJECT_ID,
+  private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  client_email: process.env.FIREBASE_CLIENT_EMAIL,
+  client_id: process.env.FIREBASE_CLIENT_ID,
+};
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
+/* Verify Token Middleware */
+
 const verifyToken = async (req, res, next) => {
-  console.log('I am from middleware');
-  const authorization = req.headers.authorization;
-  if (!authorization) {
-    return res.status(401).send({
-      message: 'unauthorised access',
-    });
-  }
-  const token = authorization.split(' ')[1];
-  console.log(token);
   try {
-    await admin.auth().verifyIdToken(token);
+    const authorization = req.headers.authorization;
+
+    if (!authorization) {
+      return res.status(401).send({
+        message: "Unauthorized Access",
+      });
+    }
+
+    const token = authorization.split(" ")[1];
+
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    req.decoded = decoded;
+
     next();
   } catch (error) {
-    res.status(401).send({
-      message: 'unauthorised access',
+    console.log(error);
+
+    return res.status(401).send({
+      message: "Unauthorized Access",
     });
   }
 };
 
+/* MongoDB */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.2gqzmaz.mongodb.net/?appName=Cluster0`;
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.2gqzmaz.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -46,155 +73,291 @@ const client = new MongoClient(uri, {
   },
 });
 
-app.get('/', (req, res) => {
-  res.send('Server is runing');
+/* Root Route */
+
+app.get("/", (req, res) => {
+  res.send("Future Box Server Running");
 });
+
+/* Main Function */
 
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
-    const event = client.db('event');
-    const eventCollection = event.collection('events');
 
+    const database = client.db("event");
+    const eventCollection = database.collection("events");
 
-    // app.get('/events', async (req, res) => {
-    //     const cursor = eventCollection.find();
-    //   const result = await cursor.toArray();
-    //   res.send(result)
+    /* Get All Events */
 
-    // })
-
-  app.get('/events', async (req, res) => {
-    try {
-      const { search, category } = req.query;
-      const query = {};
-
-      
-      if (search) {
-
-        query.title = { $regex: search, $options: 'i' }; 
-      }
-
-
-      if (category) {
-        query.eventType = category;
-      }
-
-      const result = await eventCollection
-        .find(query)
-        .sort({ eventDate: 1 })
-        .toArray();
-      res.send(result);
-    } catch (err) {
-      console.error(err);
-      res.status(500).send({ message: 'Server error' });
-    }
-  });
-
-    app.get('/events/:id', async (req, res) => {
-      const id = req.params.id;
-      const event={_id:new ObjectId(id)}
-        const cursor = eventCollection.findOne(event);
-      const result = await cursor;
-      res.send(result)
-
-    })
-
-    app.post('/events',verifyToken, async (req, res) => {
-    
-      const event = req.body
-      const result = await eventCollection.insertOne(event);
-      res.send(result)
-    })
-
-    app.get('/events/join/:email', async (req, res) => {
-      const email = req.params.email;
-      const event = await eventCollection.find({"joinedUsers.email":email}).sort({ eventDate: 1 }).toArray()
-      res.send(event)
-      
-    });
-    app.get('/events/created/:email', async (req, res) => {
-      const email = req.params.email;
-      const event = await eventCollection
-        .find({ createdByEmail: email })
-        .sort({ eventDate: 1 })
-        .toArray();
-      res.send(event)
-      
-    });
-
-        app.get('/search', async (req, res) => {
-          const search = req.query.search;
-          const result = await eventCollection
-            .find({ title: { $regex: search, $options: 'i' } })
-            .toArray();
-          res.send(result);
-        });
-
-
-    app.delete('/events/:id',verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) }
-      const result = await eventCollection.deleteOne(query)
-      res.send(result)
-      
-     })
-    app.patch('/events/:id', async (req, res) => {
-          const id = req.params.id;
-          const query = { _id: new ObjectId(id) };
-          const update = { $set: req.body };
-          const options = {};
-          const result = await eventCollection.updateOne(query, update, options);
-          res.send(result);
-      
-     })
-
-    app.post('/events/join/:id', async (req, res) => {
-      const id = req.params.id;
-      const user = req.body;
-       try {
-         await eventCollection.updateOne(
-           { _id: new ObjectId(id) },
-           {$addToSet: { joinedUsers: user } }
-         );
-
-         res.send({ success: true, message: 'Joined successfully' });
-       } catch (err) {
-         res.status(500).send({ success: false, message: 'Server error' });
-       }
-
-    })
-
-    app.delete('/events/join/:id', async (req, res) => {
-      const id = req.params.id;
-      const { email } = req.body; 
+    app.get("/events", async (req, res) => {
       try {
-        const result = await eventCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $pull: { joinedUsers: { email } } }
-        );
-        res.send({ success: result.modifiedCount > 0 });
-      }
-      catch (err) {
-        console.error(err);
-        res.status(500).send({ success: false, message: 'Server error' });
+        const { search, category } = req.query;
+
+        const query = {};
+
+        if (search) {
+          query.title = {
+            $regex: search,
+            $options: "i",
+          };
+        }
+
+        if (category) {
+          query.eventType = category;
+        }
+
+        const result = await eventCollection
+          .find(query)
+          .sort({ eventDate: 1 })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Server Error",
+        });
       }
     });
 
-    // Send a ping to confirm a successful connection
-    // await client.db('admin').command({ ping: 1 });
-    console.log(
-      'Pinged your deployment. You successfully connected to MongoDB!'
-    );
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
+    /* Get Single Event */
+
+    app.get("/events/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const query = {
+          _id: new ObjectId(id),
+        };
+
+        const result = await eventCollection.findOne(query);
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Invalid Event ID",
+        });
+      }
+    });
+
+    /* Create Event */
+
+    app.post("/events", verifyToken, async (req, res) => {
+      try {
+        const event = req.body;
+
+        const result = await eventCollection.insertOne(event);
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Failed To Create Event",
+        });
+      }
+    });
+
+    /* Joined Events */
+
+    app.get("/events/join/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+
+        const result = await eventCollection
+          .find({
+            "joinedUsers.email": email,
+          })
+          .sort({ eventDate: 1 })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Server Error",
+        });
+      }
+    });
+
+    /* Created Events */
+
+    app.get("/events/created/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+
+        const result = await eventCollection
+          .find({
+            createdByEmail: email,
+          })
+          .sort({ eventDate: 1 })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Server Error",
+        });
+      }
+    });
+
+    /* Search */
+
+    app.get("/search", async (req, res) => {
+      try {
+        const search = req.query.search;
+
+        const result = await eventCollection
+          .find({
+            title: {
+              $regex: search,
+              $options: "i",
+            },
+          })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Search Failed",
+        });
+      }
+    });
+
+    /* Delete Event */
+
+    app.delete("/events/:id", verifyToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const query = {
+          _id: new ObjectId(id),
+        };
+
+        const result = await eventCollection.deleteOne(query);
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Delete Failed",
+        });
+      }
+    });
+
+    /* Update Event */
+
+    app.patch("/events/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const query = {
+          _id: new ObjectId(id),
+        };
+
+        const update = {
+          $set: req.body,
+        };
+
+        const result = await eventCollection.updateOne(query, update);
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Update Failed",
+        });
+      }
+    });
+
+    /* Join Event */
+
+    app.post("/events/join/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const user = req.body;
+
+        await eventCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+          },
+          {
+            $addToSet: {
+              joinedUsers: user,
+            },
+          }
+        );
+
+        res.send({
+          success: true,
+          message: "Joined Successfully",
+        });
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          success: false,
+          message: "Join Failed",
+        });
+      }
+    });
+
+    /* Leave Event */
+
+    app.delete("/events/join/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const { email } = req.body;
+
+        const result = await eventCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+          },
+          {
+            $pull: {
+              joinedUsers: { email },
+            },
+          }
+        );
+
+        res.send({
+          success: result.modifiedCount > 0,
+        });
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          success: false,
+          message: "Leave Failed",
+        });
+      }
+    });
+
+    console.log("MongoDB Connected Successfully");
+  } catch (error) {
+    console.log(error);
   }
 }
+
 run().catch(console.dir);
 
+/* Server */
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`Server running on port ${port}`);
 });
+
+module.exports = app;
