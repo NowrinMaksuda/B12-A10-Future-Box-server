@@ -193,12 +193,8 @@ async function run() {
   }
 }
 run().catch(console.dir);
-<<<<<<< HEAD
 
 
-=======
->>>>>>> 1ec43e5342ee638c3e41d3622124c2b5148d2a3b
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
-
