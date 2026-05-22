@@ -1,0 +1,4 @@
+node_modules
+.env
+.vercel
+future-box-firebase-adminsdk.json
